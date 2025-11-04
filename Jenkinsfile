@@ -1,6 +1,11 @@
 pipeline {
     agent any
 
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('docker-hub-cred')
+        IMAGE_NAME = "ansh15/flask-mysql-ci-cd"
+    }
+
     stages {
         stage('Clone Repository') {
             steps {
@@ -19,23 +24,46 @@ pipeline {
             }
         }
 
-        stage('Run Tests') {
+        stage('Build Docker Image') {
             steps {
                 sh '''
-                . venv/bin/activate
-                pytest || echo "No tests found"
+                echo "Building Docker image..."
+                docker build -t $IMAGE_NAME:$BUILD_NUMBER .
                 '''
             }
         }
 
-        stage('Deploy') {
+        stage('Run Container for Testing') {
             steps {
-                echo 'Deploying Flask App...'
                 sh '''
-                . venv/bin/activate
-                python app.py &
+                echo "Running container for test..."
+                docker run -d -p 5000:5000 --name flask-test $IMAGE_NAME:$BUILD_NUMBER
+                sleep 5
+                docker ps -a
+                docker stop flask-test
+                docker rm flask-test
+                '''
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                sh '''
+                echo "Pushing image to Docker Hub..."
+                echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                docker push $IMAGE_NAME:$BUILD_NUMBER
+                '''
+            }
+        }
+
+        stage('Deploy (Optional)') {
+            steps {
+                sh '''
+                echo "Deploying container..."
+                docker run -d -p 5000:5000 --name flask-app-latest $IMAGE_NAME:$BUILD_NUMBER || true
                 '''
             }
         }
     }
 }
+
